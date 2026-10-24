@@ -114,4 +114,6 @@ Android 16 的有效 `carrier_nr_availabilities_int_array` 若不含 `2`，frame
 
 主機已測試 NV 交易、CarrierConfig 過濾、手機入口、Java 單鍵交易與反射合約、非同步回覆及單檔封裝。測試包含 CR 分隔、短暫 idle／分段回覆、先備份後寫入、回覆遺失、還原、損壞備份拒絕、訂閱切換、排隊寫入與報告範圍。Java 測試使用主機端 Android／Binder 替身，沒有把這些替身封裝到手機程式。
 
-手機已完成舊版 `audit`，證實 GET 讀回、CarrierConfig 分層及 Download 報告匯出可用。**新 SA 一鍵程式的真實 Binder 存取、SA／N1 生效與 csl NRDC 連線仍待手機測試；主機的訊號／shutdown-hook 測試不保證 Android 上的自動還原。**
+手機已完成舊版 `audit`，證實 GET 讀回、CarrierConfig 分層及 Download 報告匯出可用。後續一鍵 SH 實機報告也確認 Android 16 `CP1A.260505.005` 上的 Binder 存取與單鍵套用成功：數據 SIM 位於 slot 0，合併後政策由 `[1]` 變成 `[1,2]`，temporary override 層與讀回一致，persistent 層未新增覆寫。原 default app 的 `[1]` 仍存在是正常的分層行為；目前由後面的 temporary 層覆蓋。
+
+**SA／N1 空中註冊、csl NRDC 配置與同時排程仍待站點測試。** 主機的訊號／shutdown-hook 測試不保證 Android 上的自動還原；正常重啟會結束這次暫時覆寫。

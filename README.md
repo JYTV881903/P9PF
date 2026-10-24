@@ -34,4 +34,4 @@ Download 會產生 `P9PF-SA-report-…txt`。回傳這份報告即可；它只�
 
 程式有來源、編譯紀錄及雜湊校驗：[Java 原始碼](android/NrSaPolicy.java)、[建置資料](android/nr-sa-policy.build.json)、[一鍵檔產生器](tools/build_sa_oneclick.py)。不需要變更 build 類型或停用 SELinux。
 
-原始調校腳本分析、NV 工具及驗證範圍見 [CSL_NRDC.md](CSL_NRDC.md)。單鍵交易、非同步回覆、訂閱切換及封裝已做主機測試；Android 實機 Binder 呼叫、N1／SA 生效及 csl NRDC 連線仍待驗證。
+原始調校腳本分析、NV 工具及驗證範圍見 [CSL_NRDC.md](CSL_NRDC.md)。已在 Pixel 9 Pro Fold、Android 16 `CP1A.260505.005` 收到實機成功回報：數據 SIM 的有效政策由 `[1]` 改為 `[1,2]`，Binder 讀回與覆寫層一致。N1／SA 空中註冊及 csl NRDC 連線仍待驗證；主機測試也不保證 Android 訊號中止時自動還原。
