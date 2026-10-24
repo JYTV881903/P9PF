@@ -35,6 +35,7 @@ class PhoneLauncherTests(unittest.TestCase):
         self.downloads.mkdir()
         self.calls = self.root / "calls.txt"
         self.argv = self.root / "core-argv.txt"
+        self.sa_argv = self.root / "sa-argv.txt"
         self.props = self.root / "properties.txt"
         (scripts / "pixel9-csl-nrdc.sh").write_text(
             '#!/bin/sh\n'
@@ -54,6 +55,17 @@ class PhoneLauncherTests(unittest.TestCase):
             'printf "PRIVATE_FULL_DUMP_SENTINEL\\n" > "$P9PF_STATE_ROOT/full-dump.txt"\n'
             'printf "Phone Id = 0\\ncarrier_nr_availabilities_int_array = [1, 2]\\n"\n'
             'exit "${STUB_CARRIER_STATUS:-0}"\n'
+        )
+        (scripts / "pixel9-sa.sh").write_text(
+            '#!/bin/sh\n'
+            'printf "sa\\n" >> "$CALL_LOG"\n'
+            ': > "$SA_ARGV"\n'
+            'for arg do printf "%s\\n" "$arg" >> "$SA_ARGV"; done\n'
+            'mkdir -p "$P9PF_STATE_ROOT/sa-policy/run-sa-stub"\n'
+            'printf "PRIVATE_SA_BACKUP_SENTINEL\\n" > "$P9PF_STATE_ROOT/sa-policy/run-sa-stub/backup.properties"\n'
+            'printf "SA-POLICY-MOCK-SUMMARY\\n"\n'
+            'printf "Backup: %s/sa-policy/run-sa-stub/backup.properties\\n" "$P9PF_STATE_ROOT"\n'
+            'exit "${STUB_SA_STATUS:-0}"\n'
         )
         helpers = self.root / "bin"
         helpers.mkdir()
@@ -76,6 +88,7 @@ class PhoneLauncherTests(unittest.TestCase):
             PATH=str(helpers) + os.pathsep + os.environ["PATH"],
             P9PF_STATE_ROOT=str(self.state), P9PF_DOWNLOAD_DIR=str(self.downloads),
             CALL_LOG=str(self.calls), CORE_ARGV=str(self.argv), PROP_CALLS=str(self.props),
+            SA_ARGV=str(self.sa_argv),
         )
         self.shell = shutil.which("dash") or "/bin/sh"
 
@@ -111,6 +124,58 @@ class PhoneLauncherTests(unittest.TestCase):
         self.assert_success(self.run_launcher("restore", str(backup_dir)))
         self.assertEqual(self.argv.read_text().splitlines(),
                          ["restore", str(backup_dir), "--state-root", str(self.state)])
+
+    def test_sa_status_uses_only_policy_child_and_preserves_report_labels(self):
+        completed = self.run_launcher("sa-status")
+        self.assert_success(completed)
+        self.assertEqual(self.calls.read_text().splitlines(), ["sa", "carrier"])
+        self.assertFalse(self.argv.exists(), "SA status must not invoke the NV child")
+        self.assertEqual(self.sa_argv.read_text().splitlines(),
+                         ["status", "--state-root", str(self.state / "sa-policy")])
+        report = self.reports()[0].read_text()
+        self.assertIn("mode=sa-status\nSA_policy_exit_code=0\n", report)
+        self.assertIn("SA_policy command summary:", report)
+        self.assertIn("SA-POLICY-MOCK-SUMMARY", report)
+        self.assertNotIn("NV_exit_code=", report)
+        self.assertNotIn("NV-MOCK-SUMMARY", report)
+
+    def test_sa_enable_does_not_invoke_nv_and_keeps_private_backup_out_of_report(self):
+        completed = self.run_launcher("sa-enable")
+        self.assert_success(completed)
+        self.assertEqual(self.calls.read_text().splitlines(), ["sa", "carrier"])
+        self.assertFalse(self.argv.exists(), "SA enable must not invoke the NV child")
+        self.assertEqual(self.sa_argv.read_text().splitlines(),
+                         ["enable", "--state-root", str(self.state / "sa-policy")])
+        report = self.reports()[0].read_text()
+        self.assertIn("mode=sa-enable\nSA_policy_exit_code=0\n", report)
+        backup = self.state / "sa-policy/run-sa-stub/backup.properties"
+        self.assertTrue(backup.is_file())
+        self.assertIn("Backup: " + str(backup), report)
+        self.assertNotIn("PRIVATE_SA_BACKUP_SENTINEL", report)
+        self.assertEqual(list(self.downloads.iterdir()), self.reports())
+
+    def test_sa_restore_preserves_exact_backup_file_argument(self):
+        backup = self.root / "saved SA backup's directory" / "backup with spaces.properties"
+        backup.parent.mkdir()
+        backup.write_text("STUB_BACKUP_ONLY\n")
+        completed = self.run_launcher("sa-restore", str(backup))
+        self.assert_success(completed)
+        self.assertEqual(self.calls.read_text().splitlines(), ["sa", "carrier"])
+        self.assertFalse(self.argv.exists(), "SA restore must not invoke the NV child")
+        self.assertEqual(self.sa_argv.read_text().splitlines(),
+                         ["restore", str(backup), "--state-root", str(self.state / "sa-policy")])
+        self.assertIn("mode=sa-restore\nSA_policy_exit_code=0\n",
+                      self.reports()[0].read_text())
+
+    def test_sa_failure_still_collects_carrier_and_propagates_its_own_status(self):
+        completed = self.run_launcher("sa-enable", STUB_SA_STATUS="12")
+        self.assertEqual(completed.returncode, 12, completed.stdout + completed.stderr)
+        self.assertEqual(self.calls.read_text().splitlines(), ["sa", "carrier"])
+        self.assertFalse(self.argv.exists())
+        report = self.reports()[0].read_text()
+        self.assertIn("SA_policy_exit_code=12", report)
+        self.assertIn("CarrierConfig_exit_code=0", report)
+        self.assertNotIn("NV_exit_code=", report)
 
     def test_nv_failure_still_collects_carrier_and_preserves_exit_status(self):
         completed = self.run_launcher("audit", STUB_NV_STATUS="7")
@@ -157,7 +222,8 @@ class PhoneLauncherTests(unittest.TestCase):
 
     def test_invalid_modes_or_missing_restore_directory_do_not_invoke_children(self):
         for arguments in (("unknown",), ("restore",), ("enable-both", "extra"),
-                          ("audit", "extra")):
+                          ("audit", "extra"), ("sa-restore",),
+                          ("sa-status", "extra"), ("sa-enable", "extra")):
             with self.subTest(arguments=arguments):
                 completed = self.run_launcher(*arguments)
                 self.assertNotEqual(completed.returncode, 0)

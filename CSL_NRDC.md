@@ -2,7 +2,17 @@
 
 這版是針對你**目前已能使用 csl mmWave** 的手機做 NRDC 增量測試，並非重置後的完整 mmWave 解鎖套件。目標是先排除「NRDC 開關根本沒成功寫入」及 Android SA 政策限制，再核對特定 NRDC 組合；目前尚未實機證明能連上 csl NRDC。
 
-已知手機版本：Android 16、`CP1A.260505.005`，基頻 `g5400c-251201-260127-B-14784805`（來自你的畫面）。SIM 是本地或漫遊、目前有效 CarrierConfig 及空中能力宣告仍待確認。
+已知手機版本：Android 16、`CP1A.260505.005`，基頻 `g5400c-251201-260127-B-14784805`（來自你的畫面）。CarrierConfig 結果見下一節；SIM 是本地或漫遊及空中能力宣告仍待確認。
+
+## 已取得的手機報告與下一步
+
+後續唯讀報告確認兩個 `NrDcSupport` 旗標都已是 `01`。Phone Id 0 的有效 `carrier_nr_availabilities_int_array` 為 `[1]`，來自 default app；carrier app、persistent override 與 temporary override 層均未新增覆寫。Phone Id 1 為 `[1,2]`。報告未提供當前 default-data subId，不能直接把 Phone Id 0 當作數據 SIM。
+
+因此目前優先使用 [一鍵 SA 政策測試](README.md)。它在執行時識別數據 SIM，僅在有效值恰為 `[1]` 時暫時合併單一鍵 `[1,2]`，並等待非同步 API 讀回。已是 SA 允許狀態便不修改。這與原先 NV `enable-both` 是不同操作；本次無需重寫已啟用的 NRDC NV。
+
+新程式透過 root 的 `ICarrierConfigLoader.overrideConfig` 介面，固定 `persistent=false`，不使用 stock user build 可能拒絕的 `cmd phone cc`。它不清空整個 override bundle；restore 僅恢復備份的有效值到暫時層，正常重啟可移除本次暫時覆寫。保留原值與日誌後才嘗試修改，Binder／SELinux／反射權限不符會報錯。
+
+獨立 IMS N1 禁止原因仍可能存在；`[1,2]` 生效只排除 carrier 的這一項 SA 限制。網路是否配置 NRDC，仍須站點實測與 RRC／能力紀錄確認。傳輸逾時或硬中止後，當下讀到 `[1]` 也不證明先前排隊的覆寫已取消；此時保留備份與報告，正常重啟可結束暫時測試。主機上的 shutdown-hook 測試不代表 Android ART 必然在訊號終止時執行自動還原。
 
 ## 原稿的具體問題
 
@@ -102,4 +112,6 @@ Android 16 的有效 `carrier_nr_availabilities_int_array` 若不含 `2`，frame
 - [Android 16 CarrierConfig 定義](https://github.com/aosp-mirror/platform_frameworks_base/blob/99b01a65cc4c104933788b3143285ab6bae65827/telephony/java/android/telephony/CarrierConfigManager.java) 及 [N1／SA 使用端](https://github.com/aosp-mirror-neo/platform_frameworks_opt_telephony/blob/3449e9e2cd2738d8cdeb88514498f728622e3a6b/src/java/com/android/internal/telephony/GsmCdmaPhone.java#L2501)。
 - [TS 38.331 ASN.1 的公開實作](https://github.com/srsran/srsRAN_Project/blob/main/include/srsran/asn1/rrc_nr/ue_cap.h)，用來核對 NRDC／頻寬類別欄位，沒有據此推導未知 NV 格式。
 
-已通過 18 項本機模擬 modem 測試、3 項 CarrierConfig 過濾測試及 10 項手機入口模擬測試，包含 CR 分隔、短暫 idle／分段回覆、先備份後寫入、已套用 SET 但回覆遺失、SIGTERM 還原、手動 restore、損壞備份拒絕、報告範圍及退出狀態。主機驗證使用 Linux dash／GNU timeout；Android mksh／Toybox 與共享儲存權限尚未實機驗證。**尚未接上你的手機：真實 NV 是否接受、重啟後保留、csl 能力宣告及 NRDC 連線效果均未實機驗證。**
+主機已測試 NV 交易、CarrierConfig 過濾、手機入口、Java 單鍵交易與反射合約、非同步回覆及單檔封裝。測試包含 CR 分隔、短暫 idle／分段回覆、先備份後寫入、回覆遺失、還原、損壞備份拒絕、訂閱切換、排隊寫入與報告範圍。Java 測試使用主機端 Android／Binder 替身，沒有把這些替身封裝到手機程式。
+
+手機已完成舊版 `audit`，證實 GET 讀回、CarrierConfig 分層及 Download 報告匯出可用。**新 SA 一鍵程式的真實 Binder 存取、SA／N1 生效與 csl NRDC 連線仍待手機測試；主機的訊號／shutdown-hook 測試不保證 Android 上的自動還原。**
